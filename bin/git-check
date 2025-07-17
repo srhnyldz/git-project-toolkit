@@ -1,11 +1,13 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve the absolute path of the script's directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+LIB_DIR="${SCRIPT_DIR}/../lib"
 
-# Load libraries
-source "${SCRIPT_DIR}/../lib/core.sh"
-source "${SCRIPT_DIR}/../lib/i18n.sh"
-source "${SCRIPT_DIR}/../lib/git_utils.sh"
+# Load libraries using absolute paths
+source "${LIB_DIR}/core.sh"
+source "${LIB_DIR}/i18n.sh"
+source "${LIB_DIR}/git_utils.sh"
 
 # Load language settings
 load_language "$1" "$SCRIPT_DIR"
@@ -17,7 +19,7 @@ fi
 
 # Settings
 if [ -z "${SCAN_DIRECTORY}" ]; then
-    echo "${RED}${ERROR_SCAN_DIRECTORY_NOT_SET}${NC}"
+    error "${ERROR_SCAN_DIRECTORY_NOT_SET}"
     exit 1
 fi
 
@@ -29,8 +31,8 @@ declare -a non_git_dirs
 declare -a out_of_date_repos
 declare -a up_to_date_repos
 
-echo -e "${BLUE}${MSG_SCANNING_DIR}: ${BASE_DIR}${NC}"
-echo "-----------------------------------------------------"
+info "${BLUE}${MSG_SCANNING_DIR}: ${BASE_DIR}"
+info "-----------------------------------------------------"
 
 for dir in "$BASE_DIR"/*/; do
     dir_name=$(basename "$dir")
@@ -96,9 +98,9 @@ for dir in "$BASE_DIR"/*/; do
 done
 
 # --- REPORTING ---
-echo -e "\n${BOLD}${BLUE}=== ${MSG_REPO_TABLE_TITLE} ===${NORMAL}${NC}"
+info "\n${BOLD}${BLUE}=== ${MSG_REPO_TABLE_TITLE} ===${NORMAL}"
 if [ ${#git_repos_data[@]} -eq 0 ]; then
-    echo "${MSG_NO_GIT_REPOS_FOUND}"
+    info "${MSG_NO_GIT_REPOS_FOUND}"
 else
     HEADER_FORMAT="%-30s | %-15s | %-35s | %s\n"
     ROW_FORMAT="%-30.30s | %-25s | %-45s | %s\n"
@@ -112,28 +114,28 @@ else
     done
 fi
 
-echo -e "\n${YELLOW}=== ${MSG_UNTRACKED_FILES_TITLE} ===${NC}"
+warning "\n=== ${MSG_UNTRACKED_FILES_TITLE} ==="
 if [ ${#non_git_dirs[@]} -eq 0 ]; then
-    echo "${MSG_ALL_DIRS_ARE_REPOS}"
+    info "${MSG_ALL_DIRS_ARE_REPOS}"
 else
     for dir in "${non_git_dirs[@]}"; do
-        echo "$dir"
+        info "$dir"
     done
 fi
 
 if [ ${#out_of_date_repos[@]} -gt 0 ]; then
-    echo -e "\n${RED}=== ${MSG_UPDATE_NEEDED_REPOS_TITLE} ===${NC}"
+    error "\n=== ${MSG_UPDATE_NEEDED_REPOS_TITLE} ==="
     for repo_path in "${out_of_date_repos[@]}"; do
-        echo "$(basename "$repo_path")"
+        info "$(basename "$repo_path")"
     done
-    echo "-----------------------------------------------------"
+    info "-----------------------------------------------------"
     read -p "${PROMPT_UPDATE_CONFIRM} (${LBL_YES}/${LBL_NO}): " response
     if [[ "$response" =~ ^(${LBL_YES_OPTIONS})$ ]]; then
-        echo "${MSG_UPDATE_SCRIPT_RUNNING}"
+        info "${MSG_UPDATE_SCRIPT_RUNNING}"
         bash "${SCRIPT_DIR}/git-update" "$1" "${out_of_date_repos[@]}"
     else
-        echo "${MSG_OPERATION_CANCELLED}"
+        info "${MSG_OPERATION_CANCELLED}"
     fi
 fi
 
-echo -e "\n${MSG_SCAN_COMPLETE}"
+info "\n${MSG_SCAN_COMPLETE}"
