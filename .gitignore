@@ -1,0 +1,20 @@
+# macOS özel sistem dosyaları
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# macOS Thumbnail cache dosyaları
+._*
+
+# Spotlight dizinleri
+.Spotlight-V100
+.Trashes
+
+# Environment variables
+.env
+
+# VSCode klasörü
+.vscode/
+
+# Trae klasörü
+.trae/

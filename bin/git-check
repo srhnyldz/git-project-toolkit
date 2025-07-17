@@ -1,0 +1,139 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load libraries
+source "${SCRIPT_DIR}/../lib/core.sh"
+source "${SCRIPT_DIR}/../lib/i18n.sh"
+source "${SCRIPT_DIR}/../lib/git_utils.sh"
+
+# Load language settings
+load_language "$1" "$SCRIPT_DIR"
+
+# Load .env file
+if [ -f "${SCRIPT_DIR}/../.env" ]; then
+    source "${SCRIPT_DIR}/../.env"
+fi
+
+# Settings
+if [ -z "${SCAN_DIRECTORY}" ]; then
+    echo "${RED}${ERROR_SCAN_DIRECTORY_NOT_SET}${NC}"
+    exit 1
+fi
+
+BASE_DIR=${SCAN_DIRECTORY}
+
+# --- VARIABLES ---
+declare -a git_repos_data
+declare -a non_git_dirs
+declare -a out_of_date_repos
+declare -a up_to_date_repos
+
+echo -e "${BLUE}${MSG_SCANNING_DIR}: ${BASE_DIR}${NC}"
+echo "-----------------------------------------------------"
+
+for dir in "$BASE_DIR"/*/; do
+    dir_name=$(basename "$dir")
+
+    if [ -d "${dir}.git" ]; then
+        cd "$dir" || continue
+        REMOTE_URL=$(git config --get remote.origin.url)
+
+        if [ -z "$REMOTE_URL" ]; then
+            repo_info="${YELLOW}${dir_name}${NC} -> ${STATUS_LOCAL_REPO}"
+            non_git_dirs+=("$repo_info")
+        else
+            VISIBILITY_STR=""
+            if ! command -v gh &> /dev/null; then
+                 VISIBILITY_STR="${STATUS_GH_CLI_MISSING}"
+            else
+                IS_PRIVATE=$(gh repo view "$REMOTE_URL" --json isPrivate --jq '.isPrivate' 2>/dev/null)
+                if [ $? -eq 0 ]; then
+                    if [ "$IS_PRIVATE" = "true" ]; then
+                        VISIBILITY_STR="${RED}${STATUS_VISIBILITY_PRIVATE}${NC}"
+                    else
+                        VISIBILITY_STR="${GREEN}${STATUS_VISIBILITY_PUBLIC}${NC}"
+                    fi
+                else
+                    VISIBILITY_STR="${RED}${STATUS_REPO_NOT_FOUND}${NC}"
+                fi
+            fi
+
+            STATUS_STR=""
+            if [ -n "$(git status --porcelain)" ]; then
+                STATUS_STR="${YELLOW}${STATUS_CHANGES_AWAITING_COMMIT}${NC}"
+                out_of_date_repos+=("$dir")
+            else
+                if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+                    git fetch --quiet
+                    AHEAD=$(git rev-list --count @{u}..@)
+                    BEHIND=$(git rev-list --count @..@{u})
+
+                    if [ "$AHEAD" -eq 0 ] && [ "$BEHIND" -eq 0 ]; then
+                        STATUS_STR="${GREEN}${STATUS_UP_TO_DATE}${NC}"
+                        up_to_date_repos+=("${dir_name}")
+                    elif [ "$AHEAD" -gt 0 ] && [ "$BEHIND" -eq 0 ]; then
+                        STATUS_STR="${CYAN}${STATUS_AHEAD_PUSH_AWAITED}${NC}"
+                        out_of_date_repos+=("$dir")
+                    elif [ "$AHEAD" -eq 0 ] && [ "$BEHIND" -gt 0 ]; then
+                        STATUS_STR="${YELLOW}${STATUS_BEHIND_REMOTE_NEW}${NC}"
+                        out_of_date_repos+=("$dir")
+                    else
+                        STATUS_STR="${RED}${STATUS_DIVERGED}${NC}"
+                        out_of_date_repos+=("$dir")
+                    fi
+                else
+                    STATUS_STR="${YELLOW}${STATUS_NO_UPSTREAM}${NC}"
+                fi
+            fi
+            
+            git_repos_data+=("${dir_name}${DELIM}${VISIBILITY_STR}${DELIM}${STATUS_STR}${DELIM}${REMOTE_URL}")
+        fi
+        cd "$BASE_DIR" || exit
+    else
+        non_git_dirs+=("${dir_name}")
+    fi
+done
+
+# --- REPORTING ---
+echo -e "\n${BOLD}${BLUE}=== ${MSG_REPO_TABLE_TITLE} ===${NORMAL}${NC}"
+if [ ${#git_repos_data[@]} -eq 0 ]; then
+    echo "${MSG_NO_GIT_REPOS_FOUND}"
+else
+    HEADER_FORMAT="%-30s | %-15s | %-35s | %s\n"
+    ROW_FORMAT="%-30.30s | %-25s | %-45s | %s\n"
+    
+    printf "$HEADER_FORMAT" "$HEADER_PROJECT_NAME" "$HEADER_VISIBILITY" "$HEADER_STATUS" "$HEADER_URL"
+    printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' '-'
+
+    for data_line in "${git_repos_data[@]}"; do
+        IFS=$DELIM read -r name visibility status url <<< "$data_line"
+        printf "$ROW_FORMAT" "$name" "$visibility" "$status" "$url"
+    done
+fi
+
+echo -e "\n${YELLOW}=== ${MSG_UNTRACKED_FILES_TITLE} ===${NC}"
+if [ ${#non_git_dirs[@]} -eq 0 ]; then
+    echo "${MSG_ALL_DIRS_ARE_REPOS}"
+else
+    for dir in "${non_git_dirs[@]}"; do
+        echo "$dir"
+    done
+fi
+
+if [ ${#out_of_date_repos[@]} -gt 0 ]; then
+    echo -e "\n${RED}=== ${MSG_UPDATE_NEEDED_REPOS_TITLE} ===${NC}"
+    for repo_path in "${out_of_date_repos[@]}"; do
+        echo "$(basename "$repo_path")"
+    done
+    echo "-----------------------------------------------------"
+    read -p "${PROMPT_UPDATE_CONFIRM} (${LBL_YES}/${LBL_NO}): " response
+    if [[ "$response" =~ ^(${LBL_YES_OPTIONS})$ ]]; then
+        echo "${MSG_UPDATE_SCRIPT_RUNNING}"
+        bash "${SCRIPT_DIR}/git-update" "$1" "${out_of_date_repos[@]}"
+    else
+        echo "${MSG_OPERATION_CANCELLED}"
+    fi
+fi
+
+echo -e "\n${MSG_SCAN_COMPLETE}"

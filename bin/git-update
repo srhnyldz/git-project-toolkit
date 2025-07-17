@@ -1,0 +1,158 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load libraries
+source "${SCRIPT_DIR}/../lib/core.sh"
+source "${SCRIPT_DIR}/../lib/i18n.sh"
+
+# Load language settings
+load_language "$1" "$SCRIPT_DIR"
+
+shift # Remove the language argument from the list so that only repo paths remain.
+
+# Get repo paths from arguments
+REPOS_TO_UPDATE=("$@")
+
+if [ ${#REPOS_TO_UPDATE[@]} -eq 0 ]; then
+    echo -e "${YELLOW}Güncellenecek herhangi bir repo belirtilmedi.${NC}"
+    exit 0
+fi
+
+echo "${MSG_TOTAL} ${#REPOS_TO_UPDATE[@]} ${MSG_UPDATE_STARTING}"
+echo "====================================================="
+
+for repo_path in "${REPOS_TO_UPDATE[@]}"; do
+    repo_name=$(basename "$repo_path")
+    echo -e "${BOLD}${MSG_REPO_PROCESSING}: ${BLUE}${repo_name}${NC}"
+    
+    cd "$repo_path" || { echo -e "${RED}${MSG_REPO_NOT_ACCESSIBLE} ${repo_path}${NC}"; continue; }
+
+    if [ -n "$(git status --porcelain)" ]; then
+        echo -e "  -> ${YELLOW}${MSG_STATUS_LOCAL_CHANGES_FOUND}${NC}"
+        echo "  -> ${MSG_RUNNING_GIT_ADD}"
+        git add .
+        
+        # Interactive commit message
+        commit_type=""
+        while [ -z "$commit_type" ]; do
+            echo -e "    ${PROMPT_COMMIT_TYPE_MENU}"
+            read -p "    " choice
+            case "$choice" in
+                1) commit_type="feat" ;;
+                2) commit_type="fix" ;;
+                3) commit_type="docs" ;;
+                4) commit_type="style" ;;
+                5) commit_type="refactor" ;;
+                6) commit_type="chore" ;;
+                *) echo -e "  -> ${RED}${MSG_INVALID_CHOICE}${NC}" ;;
+            esac
+        done
+        read -p "    ${PROMPT_COMMIT_SCOPE} " commit_scope
+        read -p "    ${PROMPT_COMMIT_MESSAGE} " commit_message
+
+        if [ -n "$commit_scope" ]; then
+            COMMIT_MSG="$commit_type($commit_scope): $commit_message"
+        else
+            COMMIT_MSG="$commit_type: $commit_message"
+        fi
+
+        echo "  -> ${MSG_RUNNING_GIT_COMMIT} ${COMMIT_MSG})"
+        git commit -m "$COMMIT_MSG" > /dev/null
+        echo -e "  -> ${GREEN}${MSG_COMMIT_SUCCESS}${NC} ${COMMIT_MSG}"
+        
+        echo "  -> ${MSG_RUNNING_GIT_PUSH}"
+        if git push; then
+            echo -e "  -> ${GREEN}${MSG_PUSH_SUCCESS}${NC}"
+        else
+            echo -e "  -> ${RED}${MSG_PUSH_FAIL}${NC}"
+        fi
+    else
+        echo -e "  -> ${GREEN}${MSG_STATUS_DIR_CLEAN}${NC}"
+        
+        if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+            git fetch --quiet
+            AHEAD=$(git rev-list --count @{u}..@)
+            BEHIND=$(git rev-list --count @..@{u})
+
+            if [ "$AHEAD" -gt 0 ] && [ "$BEHIND" -eq 0 ]; then
+                echo "  -> ${MSG_ONLY_PUSH_AWAITED}"
+                if git push; then
+                    echo -e "  -> ${GREEN}${MSG_PUSH_AWAITED_SUCCESS}${NC}"
+                else
+                    echo -e "  -> ${RED}${MSG_PUSH_FAIL}${NC}"
+                fi
+            elif [ "$BEHIND" -gt 0 ]; then
+                echo -e "  -> ${RED}${BOLD}${MSG_REPO_BEHIND_WARNING}${NORMAL}${NC}"
+                echo ""
+                echo -e "    ${BOLD}${MENU_TITLE}${NORMAL}"
+                echo -e "    ---------------------------------------"
+                echo -e "    ${CYAN}${MENU_OPTION_A}${NC}"
+                echo -e "      ${NORMAL}${MENU_DESC_A}${NORMAL}"
+                echo ""
+                echo -e "    ${YELLOW}${MENU_OPTION_P}${NC}"
+                echo -e "      ${NORMAL}${MENU_DESC_P}${NORMAL}"
+                echo ""
+                echo -e "    ${YELLOW}${MENU_OPTION_R}${NC}"
+                echo -e "      ${NORMAL}${MENU_DESC_R}${NORMAL}"
+                echo ""
+                echo -e "    ${RED}${MENU_OPTION_S} (${BOLD}ÇOK RİSKLİ! DİKKAT!${NORMAL}${RED})${NC}"
+                echo -e "      ${NORMAL}${MENU_DESC_S}${NORMAL}"
+                echo "    ---------------------------------------"
+                
+                # In the English menu, S, P, R, E letters will be used. In Turkish, A, P, R, S.
+                # So it's better to adjust the case according to the language.
+                # For now, it is kept combined for simplicity.
+                read -p "    ${PROMPT_INTERACTIVE_CHOICE}" user_choice
+
+                case "$user_choice" in
+                                        [aAsS]) # Skip (tr) or Skip (en)
+                        echo -e "  -> ${CYAN}${MSG_CHOICE_A}${NC}"
+                        ;;
+                                        [pP]) # Pull
+                        echo -e "  -> ${YELLOW}${MSG_CHOICE_P}${NC}"
+                        if git pull; then
+                            echo -e "  -> ${GREEN}${MSG_PULL_SUCCESS}${NC}"
+                        else
+                            echo -e "  -> ${RED}${MSG_PULL_FAIL}${NC}"
+                            echo -e "  -> ${RED}${MSG_PULL_FAIL_MANUAL_ACTION}${NC}"
+                        fi
+                        ;;
+                                        [rR]) # Rebase
+                        echo -e "  -> ${YELLOW}${MSG_CHOICE_R}${NC}"
+                        if git pull --rebase; then
+                            echo -e "  -> ${GREEN}${MSG_REBASE_SUCCESS}${NC}"
+                        else
+                            echo -e "  -> ${RED}${MSG_REBASE_FAIL}${NC}"
+                            echo -e "  -> ${RED}${MSG_PULL_FAIL_MANUAL_ACTION}${NC}"
+                        fi
+                        ;;
+                                        [sE]) # Hard Reset (tr) or hard rEset (en)
+                        echo -e "  -> ${RED}${BOLD}${MSG_CHOICE_S}${NORMAL}"
+                        read -p "    ${PROMPT_RESET_CONFIRM} (${LBL_YES}/${LBL_NO}): " confirm_reset
+                        if [[ "$confirm_reset" == "${LBL_RESET_CONFIRM_YES}" ]]; then
+                            echo -e "  -> ${MSG_RESETTING_REPO}"
+                            if git reset --hard @{u}; then
+                                echo -e "  -> ${GREEN}${MSG_RESET_SUCCESS}${NC}"
+                            else
+                                echo -e "  -> ${RED}${MSG_RESET_FAIL}${NC}"
+                            fi
+                        else
+                            echo -e "  -> ${CYAN}${MSG_RESET_CANCELLED}${NC}"
+                        fi
+                        ;;
+                    *)
+                        echo -e "  -> ${YELLOW}${MSG_INVALID_CHOICE}${NC}"
+                        ;;
+                esac
+            else
+                echo -e "  -> ${GREEN}${MSG_REPO_ALREADY_UP_TO_DATE}${NC}"
+            fi
+        else
+            echo -e "  -> ${YELLOW}${MSG_NO_UPSTREAM_WARNING}${NC}"
+        fi
+    fi
+    echo "-----------------------------------------------------"
+done
+
+echo -e "${BOLD}${GREEN}${MSG_UPDATE_COMPLETE}${NC}"
