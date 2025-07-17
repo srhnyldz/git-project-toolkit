@@ -53,7 +53,7 @@ To run the scripts with full functionality, you need the following tools install
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/YOUR_USERNAME/git-project-toolkit.git
+    git clone https://github.com/srhnyldz/git-project-toolkit.git
     cd git-project-toolkit
     ```
 
@@ -169,7 +169,7 @@ Script'lerin tam fonksiyonla çalışabilmesi için sisteminizde şu araçların
 
 1.  **Repoyu Klonlayın:**
     ```bash
-    git clone https://github.com/KULLANICI_ADINIZ/git-project-toolkit.git
+    git clone https://github.com/srhnyldz/git-project-toolkit.git
     cd git-project-toolkit
     ```
 
